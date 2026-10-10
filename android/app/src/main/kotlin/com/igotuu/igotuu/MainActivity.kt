@@ -1,0 +1,5 @@
+package com.igotuu.igotuu
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
