@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../widgets/frosted_glass.dart';
+import '../../../nearby/presentation/nearby_workers_screen.dart';
 
 class ServicesGrid extends StatelessWidget {
   const ServicesGrid({super.key});
@@ -104,6 +105,7 @@ class ServicesGrid extends StatelessWidget {
             itemBuilder: (context, index) {
               final service = _services[index];
               return _buildServicePanel(
+                context: context,
                 label: service['label'] as String,
                 icon: service['icon'] as IconData,
                 subtitle: service['subtitle'] as String,
@@ -117,6 +119,7 @@ class ServicesGrid extends StatelessWidget {
   }
 
   Widget _buildServicePanel({
+    required BuildContext context,
     required String label,
     required IconData icon,
     required String subtitle,
@@ -129,9 +132,13 @@ class ServicesGrid extends StatelessWidget {
       fillColor: Colors.white.withValues(alpha: 0.32),
       borderColor: Colors.white.withValues(alpha: 0.58),
       onTap: () {
-        // Taps do nothing for now per spec
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => NearbyWorkersScreen(trade: label),
+          ),
+        );
       },
-      semanticLabel: '$label service panel',
+      semanticLabel: '$label service panel, tap to view nearby workers',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,

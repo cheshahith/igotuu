@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -11,6 +12,11 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../widgets/frosted_glass.dart';
+import '../../../triage/data/firebase_ai_triage_service.dart';
+import '../../../triage/domain/models/triage_result.dart';
+import '../../../triage/domain/services/ai_triage_service.dart';
+import '../../../triage/presentation/widgets/ai_triage_result_view.dart';
+import '../../../triage/presentation/widgets/manual_trade_picker_modal.dart';
 
 class AiAssistCard extends StatefulWidget {
   const AiAssistCard({super.key});
@@ -26,6 +32,13 @@ class _AiAssistCardState extends State<AiAssistCard>
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final ImagePicker _imagePicker = ImagePicker();
+  final AiTriageService _triageService = FirebaseAiTriageService.create();
+
+  // AI Triage State
+  bool _isTriaging = false;
+  TriageResult? _triageResult;
+  String? _triageError;
+  Timer? _maxRecordingTimer;
 
   // State flags
   String _selectedLanguageCode = 'en_US';
@@ -46,6 +59,11 @@ class _AiAssistCardState extends State<AiAssistCard>
   // Pulse animation for recording state
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
+
+  // Neon touch effect state for submit button
+  bool _isSubmitPressed = false;
+  bool _isNeonPulsing = false;
+  Timer? _neonPulseTimer;
 
   @override
   void initState() {
@@ -129,6 +147,8 @@ class _AiAssistCardState extends State<AiAssistCard>
 
   @override
   void dispose() {
+    _neonPulseTimer?.cancel();
+    _maxRecordingTimer?.cancel();
     _pulseController.dispose();
     _textController.dispose();
     _audioRecorder.dispose();
@@ -139,8 +159,12 @@ class _AiAssistCardState extends State<AiAssistCard>
     super.dispose();
   }
 
-  bool get _hasTextOrVoice =>
-      _textController.text.trim().isNotEmpty || _recordedAudioPath != null;
+  bool get _hasAnyInput =>
+      _textController.text.trim().isNotEmpty ||
+      _recordedAudioPath != null ||
+      _capturedImage != null;
+
+  bool get _hasTextOrVoice => _hasAnyInput;
 
   // Toggle voice listening + recording
   Future<void> _toggleVoiceRecording() async {
@@ -177,6 +201,22 @@ class _AiAssistCardState extends State<AiAssistCard>
         path: filePath,
       );
 
+      // Start 60-second hard cap timer per requirements
+      _maxRecordingTimer?.cancel();
+      _maxRecordingTimer = Timer(const Duration(seconds: 60), () {
+        if (_isRecording || _isListening) {
+          _stopListeningAndRecording();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Voice recording capped at 60 seconds maximum.'),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        }
+      });
+
       // 3. Start Speech-to-Text transcription if initialized
       if (!_isSpeechInitialized) {
         await _initSpeech();
@@ -197,7 +237,7 @@ class _AiAssistCardState extends State<AiAssistCard>
           },
           listenOptions: stt.SpeechListenOptions(
             localeId: _selectedLanguageCode,
-            listenFor: const Duration(seconds: 45),
+            listenFor: const Duration(seconds: 60),
             pauseFor: const Duration(seconds: 4),
           ),
         );
@@ -208,6 +248,8 @@ class _AiAssistCardState extends State<AiAssistCard>
           _isListening = true;
           _isRecording = true;
           _recordedAudioPath = null;
+          _triageResult = null;
+          _triageError = null;
         });
       }
     } catch (e) {
@@ -222,6 +264,7 @@ class _AiAssistCardState extends State<AiAssistCard>
   }
 
   Future<void> _stopListeningAndRecording() async {
+    _maxRecordingTimer?.cancel();
     String? path;
     try {
       if (_isRecording) {
@@ -282,19 +325,21 @@ class _AiAssistCardState extends State<AiAssistCard>
     }
   }
 
-  // Capture photo from camera
+  // Capture photo from camera (resized on-device to max 1024px, JPEG 80% per requirements)
   Future<void> _captureCameraPhoto() async {
     try {
       final photo = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1200,
-        maxHeight: 1200,
-        imageQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
       );
 
       if (photo != null && mounted) {
         setState(() {
           _capturedImage = photo;
+          _triageResult = null;
+          _triageError = null;
         });
       }
     } catch (e) {
@@ -311,39 +356,110 @@ class _AiAssistCardState extends State<AiAssistCard>
   void _removeCapturedImage() {
     setState(() {
       _capturedImage = null;
+      _triageResult = null;
+      _triageError = null;
     });
   }
 
-  void _handleSubmit() {
-    if (!_hasTextOrVoice) return;
+  // Execute AI triage with text, voice, and/or photo
+  Future<void> _runTriage({String? customText}) async {
+    final text = customText ?? _textController.text.trim();
+    final hasAudio = _recordedAudioPath != null;
+    final hasImage = _capturedImage != null;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(
-              Icons.auto_awesome_rounded,
-              color: AppColors.lightSage,
-              size: 20,
+    if (text.isEmpty && !hasAudio && !hasImage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please describe, speak, or take a photo of your problem first!',
+            style: AppTypography.bodySmall(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'AI Diagnosis coming soon! Matching your issue with top verified pros.',
-                style: AppTypography.bodySmall(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ],
+          ),
+          backgroundColor: AppColors.textDark,
+          behavior: SnackBarBehavior.floating,
         ),
-        backgroundColor: AppColors.textDark,
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+      );
+      return;
+    }
+
+    setState(() {
+      _isTriaging = true;
+      _triageError = null;
+      _triageResult = null;
+    });
+
+    try {
+      Uint8List? audioBytes;
+      if (hasAudio) {
+        final audioFile = File(_recordedAudioPath!);
+        if (await audioFile.exists()) {
+          audioBytes = await audioFile.readAsBytes();
+        }
+      }
+
+      Uint8List? imageBytes;
+      if (hasImage) {
+        imageBytes = await _capturedImage!.readAsBytes();
+      }
+
+      final result = await _triageService.triage(
+        text: text.isEmpty ? null : text,
+        audio: audioBytes,
+        audioMime: 'audio/m4a',
+        image: imageBytes,
+      );
+
+      if (mounted) {
+        setState(() {
+          _triageResult = result;
+          // Transcript fills the text field (editable) so users can correct mistakes
+          if (result.transcript.isNotEmpty) {
+            _textController.text = result.transcript;
+            _textController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _textController.text.length),
+            );
+          }
+        });
+      }
+    } on TriageException catch (e) {
+      if (mounted) {
+        setState(() {
+          _triageError = e.message;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _triageError = 'Could not complete AI triage: $e';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isTriaging = false;
+        });
+      }
+    }
+  }
+
+  void _handleSubmit() {
+    _runTriage();
+  }
+
+  Future<void> _handleFollowUp(String answer) async {
+    final original = _textController.text.trim();
+    final combined = original.isEmpty ? answer : '$original (Note: $answer)';
+    _textController.text = combined;
+    await _runTriage(customText: combined);
+  }
+
+  void _resetTriage() {
+    setState(() {
+      _triageResult = null;
+      _triageError = null;
+    });
   }
 
   String _formatDuration(Duration d) {
@@ -417,7 +533,42 @@ class _AiAssistCardState extends State<AiAssistCard>
               ],
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+
+            // One-line privacy notice per safety requirements
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppColors.sage.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.sage.withValues(alpha: 0.30),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.security_rounded,
+                    size: 14,
+                    color: AppColors.sageDark,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your text, voice and photo are sent to AI to find the right worker.',
+                      style: AppTypography.bodySmall(
+                        fontSize: 11,
+                        color: AppColors.sageDark,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
 
             // Multi-line text field container
             FrostedGlass(
@@ -544,8 +695,139 @@ class _AiAssistCardState extends State<AiAssistCard>
 
             // Submit Button
             _buildSubmitButton(),
+
+            // Glass loading state
+            if (_isTriaging) ...[
+              const SizedBox(height: 16),
+              _buildLoadingState(),
+            ],
+
+            // Friendly error state with fallback manual picker
+            if (_triageError != null) ...[
+              const SizedBox(height: 16),
+              _buildErrorState(),
+            ],
+
+            // Triage Result View
+            if (_triageResult != null && !_isTriaging) ...[
+              const SizedBox(height: 16),
+              AiTriageResultView(
+                result: _triageResult!,
+                onFollowUpSubmitted: _handleFollowUp,
+                onReset: _resetTriage,
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return FrostedGlass(
+      borderRadius: 20,
+      blurSigma: 16,
+      padding: const EdgeInsets.all(18),
+      fillColor: Colors.white.withValues(alpha: 0.55),
+      borderColor: AppColors.sage.withValues(alpha: 0.4),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.sageDark),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Analyzing with Gemini AI...',
+                  style: AppTypography.headingSmall(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textDark,
+                  ),
+                ),
+                Text(
+                  'Identifying the right specialist from your request',
+                  style: AppTypography.bodySmall(
+                    fontSize: 11.5,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return FrostedGlass(
+      borderRadius: 20,
+      blurSigma: 16,
+      padding: const EdgeInsets.all(16),
+      fillColor: const Color(0xFFFFF3F3).withValues(alpha: 0.8),
+      borderColor: const Color(0xFFFFCDD2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.info_outline_rounded,
+                color: Color(0xFFD32F2F),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Triage Notice',
+                  style: AppTypography.headingSmall(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFFD32F2F),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _triageError ?? 'An issue occurred during AI analysis.',
+            style: AppTypography.bodySmall(
+              fontSize: 12,
+              color: AppColors.textDark,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: ElevatedButton.icon(
+              onPressed: () => ManualTradePickerModal.show(context),
+              icon: const Icon(Icons.handyman_rounded, size: 16),
+              label: const Text(
+                'Choose Trade Manually',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.sageDark,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -834,63 +1116,182 @@ class _AiAssistCardState extends State<AiAssistCard>
 
   Widget _buildSubmitButton() {
     final enabled = _hasTextOrVoice;
+    final isNeonActive = _isSubmitPressed || _isNeonPulsing;
 
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 250),
-      opacity: enabled ? 1.0 : 0.45,
-      child: Container(
-        width: double.infinity,
-        height: 52,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: LinearGradient(
-            colors: enabled
-                ? [
-                    AppColors.sageDark,
-                    AppColors.sage,
-                  ]
-                : [
-                    AppColors.sageDark.withValues(alpha: 0.6),
-                    AppColors.sage.withValues(alpha: 0.6),
-                  ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          boxShadow: enabled
-              ? [
-                  BoxShadow(
-                    color: AppColors.sage.withValues(alpha: 0.40),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : null,
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: enabled ? _handleSubmit : null,
+    return AnimatedScale(
+      duration: const Duration(milliseconds: 140),
+      scale: _isSubmitPressed ? 0.97 : (isNeonActive ? 1.02 : 1.0),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 250),
+        opacity: enabled ? 1.0 : (isNeonActive ? 0.85 : 0.45),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          width: double.infinity,
+          height: 52,
+          decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            splashColor: Colors.white.withValues(alpha: 0.2),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.auto_awesome_rounded,
-                    color: Colors.white,
-                    size: 19,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Analyze & Find Workers',
-                    style: AppTypography.label(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+            gradient: LinearGradient(
+              colors: isNeonActive
+                  ? const [
+                      Color(0xFF0F5132),
+                      Color(0xFF198754),
+                      Color(0xFF00FF87),
+                    ]
+                  : (enabled
+                      ? const [
+                          AppColors.sageDark,
+                          AppColors.sage,
+                        ]
+                      : [
+                          AppColors.sageDark.withValues(alpha: 0.6),
+                          AppColors.sage.withValues(alpha: 0.6),
+                        ]),
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(
+              color: isNeonActive
+                  ? const Color(0xFF00FF87)
+                  : (enabled
+                      ? Colors.white.withValues(alpha: 0.55)
+                      : Colors.transparent),
+              width: isNeonActive ? 2.2 : 1.0,
+            ),
+            boxShadow: isNeonActive
+                ? [
+                    // Radiant core neon emerald halo
+                    BoxShadow(
+                      color: const Color(0xFF00FF87).withValues(alpha: 0.95),
+                      blurRadius: 22,
+                      spreadRadius: 2,
                     ),
-                  ),
-                ],
+                    // Electric mint ambient spread
+                    BoxShadow(
+                      color: const Color(0xFF60EFFF).withValues(alpha: 0.70),
+                      blurRadius: 38,
+                      spreadRadius: 5,
+                    ),
+                    // Deep wide luminous aura
+                    BoxShadow(
+                      color: const Color(0xFF00F5D4).withValues(alpha: 0.45),
+                      blurRadius: 56,
+                      spreadRadius: 9,
+                    ),
+                  ]
+                : (enabled
+                    ? [
+                        BoxShadow(
+                          color: AppColors.sage.withValues(alpha: 0.40),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ]
+                    : null),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTapDown: (_) {
+                HapticFeedback.lightImpact();
+                setState(() {
+                  _isSubmitPressed = true;
+                });
+              },
+              onTapUp: (_) {
+                setState(() {
+                  _isSubmitPressed = false;
+                });
+              },
+              onTapCancel: () {
+                setState(() {
+                  _isSubmitPressed = false;
+                });
+              },
+              onTap: () {
+                HapticFeedback.mediumImpact();
+                _neonPulseTimer?.cancel();
+                setState(() {
+                  _isNeonPulsing = true;
+                  _isSubmitPressed = false;
+                });
+                _neonPulseTimer = Timer(const Duration(milliseconds: 650), () {
+                  if (mounted) {
+                    setState(() {
+                      _isNeonPulsing = false;
+                    });
+                  }
+                });
+
+                if (enabled) {
+                  _handleSubmit();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Please describe or record your problem first!',
+                        style: AppTypography.bodySmall(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      backgroundColor: AppColors.textDark,
+                      duration: const Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              borderRadius: BorderRadius.circular(20),
+              splashColor: const Color(0xFF00FF87).withValues(alpha: 0.35),
+              highlightColor: const Color(0xFF60EFFF).withValues(alpha: 0.25),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.auto_awesome_rounded,
+                      color: isNeonActive
+                          ? const Color(0xFFE8FFF0)
+                          : Colors.white,
+                      size: 19,
+                      shadows: isNeonActive
+                          ? [
+                              const Shadow(
+                                color: Color(0xFF00FF87),
+                                blurRadius: 16,
+                              ),
+                              const Shadow(
+                                color: Colors.white,
+                                blurRadius: 4,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Analyze & Find Workers',
+                      style: AppTypography.label(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ).copyWith(
+                        shadows: isNeonActive
+                            ? [
+                                const Shadow(
+                                  color: Color(0xFF00FF87),
+                                  blurRadius: 16,
+                                ),
+                                const Shadow(
+                                  color: Colors.white,
+                                  blurRadius: 4,
+                                ),
+                              ]
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

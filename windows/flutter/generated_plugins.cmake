@@ -5,6 +5,9 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
   file_selector_windows
+  firebase_app_check
+  firebase_auth
+  firebase_core
   geolocator_windows
   record_windows
   speech_to_text_windows

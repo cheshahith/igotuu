@@ -62,20 +62,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 onAddressChanged: _onAddressChanged,
               ),
 
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
 
-              // 2. Pick a service grid (2x2)
+              // 2. AI Assist Card ("Find your problem?") - placed first per requirement
+              const AiAssistCard(),
+
+              const SizedBox(height: 24),
+
+              // 3. The 4 panels: Plumber, Electrician, Carpenter, Mechanic
               const ServicesGrid(),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 26),
 
-              // 3. Top rated near you (auto-scrolling horizontal strip)
+              // 4. Service provider train moving sideways continuously
               const TopRatedStrip(),
-
-              const SizedBox(height: 28),
-
-              // 4. AI Assist Card ("Find your problem?")
-              const AiAssistCard(),
 
               const SizedBox(height: 20),
             ],

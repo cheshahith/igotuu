@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
-import '../../home/presentation/home_screen.dart';
 import '../../../widgets/persistent_shell.dart';
 import 'widgets/liquid_wave_clipper.dart';
 
 /// Splash intro screen for igotuu
 /// Sequence:
-/// 1. Centered logo "igu" appears in bold script font
-/// 2. Smoothly expands into "igotuu" without jumps
+/// 1. Centered logo "igu" appears in bold script font in palette soft pink (#F6E2E9)
+/// 2. Smoothly expands into "igotuu" without jumps on a rich forest sage canvas
 /// 3. Holds for 0.5s
-/// 4. Liquid sage wave sweeps across the screen and reveals the Home page
-/// Total duration under 3.5s with Hero logo continuity.
+/// 4. When the intro completes, the intro slide goes UP like a liquid wave,
+///    revealing the soft pink checked Home page underneath!
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -27,7 +26,7 @@ class _SplashScreenState extends State<SplashScreen>
   // Animation curves
   late final Animation<double> _fadeInAnimation;
   late final Animation<double> _expansionAnimation;
-  late final Animation<double> _liquidWaveAnimation;
+  late final Animation<double> _liquidSlideUpAnimation;
 
   bool _navigated = false;
 
@@ -40,7 +39,7 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(milliseconds: 3200),
     );
 
-    // Phase 1 (0ms - 600ms): Logo "igu" fades and scales into center
+    // Phase 1 (0ms - 600ms): Logo "igu" in soft pink fades and scales into center
     _fadeInAnimation = CurvedAnimation(
       parent: _masterController,
       curve: const Interval(0.0, 0.20, curve: Curves.easeOutBack),
@@ -54,10 +53,10 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Phase 3 (1750ms - 2250ms): Hold for ~0.5s
 
-    // Phase 4 (2250ms - 3200ms): Liquid sage wave sweeps across the screen
-    _liquidWaveAnimation = CurvedAnimation(
+    // Phase 4 (2250ms - 3200ms): Intro slide sweeps UP like a liquid
+    _liquidSlideUpAnimation = CurvedAnimation(
       parent: _masterController,
-      curve: const Interval(0.70, 1.0, curve: Curves.easeInOutQuart),
+      curve: const Interval(0.68, 1.0, curve: Curves.easeInOutQuart),
     );
 
     _masterController.addStatusListener((status) {
@@ -73,18 +72,9 @@ class _SplashScreenState extends State<SplashScreen>
   void _navigateToHome() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 650),
+        transitionDuration: Duration.zero,
         pageBuilder: (context, animation, secondaryAnimation) {
-          return const PersistentShell(child: HomeScreen());
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-            ),
-            child: child,
-          );
+          return const PersistentShell();
         },
       ),
     );
@@ -98,142 +88,42 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    // App name color is the palette soft pink (#F6E2E9)
     const scriptStyle = TextStyle(
       fontSize: 54,
       fontWeight: FontWeight.w700,
-      color: AppColors.sageDark,
+      color: AppColors.softPink,
       letterSpacing: 0.2,
+      shadows: [
+        Shadow(
+          color: Color(0x60F6E2E9),
+          blurRadius: 18,
+          offset: Offset(0, 3),
+        ),
+      ],
     );
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // Background ambient soft blobs
-          Positioned(
-            top: -50,
-            right: -60,
-            child: _buildAmbientBlob(
-              size: 320,
-              color: AppColors.softPink.withValues(alpha: 0.7),
-            ),
-          ),
-          Positioned(
-            bottom: -60,
-            left: -50,
-            child: _buildAmbientBlob(
-              size: 360,
-              color: AppColors.lightSage.withValues(alpha: 0.65),
-            ),
+          // 1. Base Layer: The Home Screen (unveiled seamlessly as the intro slide goes up like liquid)
+          const Positioned.fill(
+            child: PersistentShell(),
           ),
 
-          // Center Logo with Animated Expansion: "igu" -> "igotuu"
-          Center(
-            child: AnimatedBuilder(
-              animation: _masterController,
-              builder: (context, child) {
-                final fade = _fadeInAnimation.value;
-                final expand = _expansionAnimation.value;
-
-                return Opacity(
-                  opacity: fade.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: 0.85 + (0.15 * fade),
-                    child: Hero(
-                      tag: 'igotuu_logo_hero',
-                      flightShuttleBuilder: (flightContext, animation,
-                          flightDirection, fromHeroContext, toHeroContext) {
-                        return Material(
-                          color: Colors.transparent,
-                          child: Text(
-                            'igotuu',
-                            style: AppTypography.logoScript(
-                              fontSize: 28,
-                              color: AppColors.sageDark,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Material(
-                        color: Colors.transparent,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            // "ig" - always present
-                            Text(
-                              'ig',
-                              style: AppTypography.logoScript(
-                                fontSize: scriptStyle.fontSize!,
-                                color: scriptStyle.color!,
-                              ),
-                            ),
-
-                            // "ot" - expands smoothly from 0 width to full width
-                            ClipRect(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: expand,
-                                child: Opacity(
-                                  opacity: expand.clamp(0.0, 1.0),
-                                  child: Text(
-                                    'ot',
-                                    style: AppTypography.logoScript(
-                                      fontSize: scriptStyle.fontSize!,
-                                      color: scriptStyle.color!,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                            // "u" - always present
-                            Text(
-                              'u',
-                              style: AppTypography.logoScript(
-                                fontSize: scriptStyle.fontSize!,
-                                color: scriptStyle.color!,
-                              ),
-                            ),
-
-                            // "u" (second 'u') - expands smoothly from 0 width to full width
-                            ClipRect(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: expand,
-                                child: Opacity(
-                                  opacity: expand.clamp(0.0, 1.0),
-                                  child: Text(
-                                    'u',
-                                    style: AppTypography.logoScript(
-                                      fontSize: scriptStyle.fontSize!,
-                                      color: scriptStyle.color!,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          // Liquid sage wave sweep transition
+          // 2. Top Layer: Intro Slide with liquid slide-up clipper
           AnimatedBuilder(
-            animation: _liquidWaveAnimation,
+            animation: _liquidSlideUpAnimation,
             builder: (context, child) {
-              final waveProgress = _liquidWaveAnimation.value;
-              if (waveProgress <= 0.0) return const SizedBox.shrink();
+              final slideProgress = _liquidSlideUpAnimation.value;
+              if (slideProgress >= 1.0) {
+                return const SizedBox.shrink();
+              }
 
               return ClipPath(
-                clipper: LiquidWaveClipper(
-                  progress: waveProgress,
+                clipper: LiquidSlideUpClipper(
+                  progress: slideProgress,
                   waveAmplitude: 36.0,
                 ),
                 child: Container(
@@ -241,15 +131,124 @@ class _SplashScreenState extends State<SplashScreen>
                   height: double.infinity,
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
                       colors: [
-                        AppColors.sageDark,
-                        AppColors.sage,
-                        AppColors.lightSage,
+                        Color(0xFF1E2B22),
+                        Color(0xFF26332A),
+                        Color(0xFF2E3D32),
                       ],
-                      stops: [0.0, 0.65, 1.0],
                     ),
+                  ),
+                  child: Stack(
+                    children: [
+                      // Ambient luminous glowing blobs on the intro slide
+                      Positioned(
+                        top: -50,
+                        right: -60,
+                        child: _buildAmbientBlob(
+                          size: 340,
+                          color: AppColors.sage.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: -60,
+                        left: -50,
+                        child: _buildAmbientBlob(
+                          size: 360,
+                          color: AppColors.softPink.withValues(alpha: 0.20),
+                        ),
+                      ),
+
+                      // Center Logo with Animated Expansion: "igu" -> "igotuu" in soft pink
+                      Center(
+                        child: AnimatedBuilder(
+                          animation: _masterController,
+                          builder: (context, child) {
+                            final fade = _fadeInAnimation.value;
+                            final expand = _expansionAnimation.value;
+
+                            return Opacity(
+                              opacity: fade.clamp(0.0, 1.0),
+                              child: Transform.scale(
+                                scale: 0.85 + (0.15 * fade),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                                    textBaseline: TextBaseline.alphabetic,
+                                    children: [
+                                      // "ig" - always present
+                                      Text(
+                                        'ig',
+                                        style: AppTypography.logoScript(
+                                          fontSize: scriptStyle.fontSize!,
+                                          color: scriptStyle.color!,
+                                        ).copyWith(
+                                          shadows: scriptStyle.shadows,
+                                        ),
+                                      ),
+
+                                      // "ot" - expands smoothly from 0 width to full width
+                                      ClipRect(
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          widthFactor: expand,
+                                          child: Opacity(
+                                            opacity: expand.clamp(0.0, 1.0),
+                                            child: Text(
+                                              'ot',
+                                              style: AppTypography.logoScript(
+                                                fontSize: scriptStyle.fontSize!,
+                                                color: scriptStyle.color!,
+                                              ).copyWith(
+                                                shadows: scriptStyle.shadows,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+
+                                      // "u" - always present
+                                      Text(
+                                        'u',
+                                        style: AppTypography.logoScript(
+                                          fontSize: scriptStyle.fontSize!,
+                                          color: scriptStyle.color!,
+                                        ).copyWith(
+                                          shadows: scriptStyle.shadows,
+                                        ),
+                                      ),
+
+                                      // "u" (second 'u') - expands smoothly from 0 width to full width
+                                      ClipRect(
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          widthFactor: expand,
+                                          child: Opacity(
+                                            opacity: expand.clamp(0.0, 1.0),
+                                            child: Text(
+                                              'u',
+                                              style: AppTypography.logoScript(
+                                                fontSize: scriptStyle.fontSize!,
+                                                color: scriptStyle.color!,
+                                              ).copyWith(
+                                                shadows: scriptStyle.shadows,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );

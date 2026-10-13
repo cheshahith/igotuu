@@ -12,7 +12,8 @@ class AppColors {
   AppColors._();
 
   // Primary Palette
-  static const Color background = Color(0xFFFEFAF3); // Cream page background
+  static const Color background = Color(0xFFF6E2E9); // Soft pink page background from palette
+  static const Color cream = Color(0xFFFEFAF3); // Warm cream for highlights & accents
   static const Color softPink = Color(0xFFF6E2E9); // Soft pink for blobs & accents
   static const Color lightSage = Color(0xFFB8CFB3); // Light sage for blobs & highlights
   static const Color sage = Color(0xFF84A282); // Sage primary

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "482232683818",
+    "project_id": "igotuu",
+    "storage_bucket": "igotuu.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:482232683818:android:fde83ca78d2f6019e16253",
+        "android_client_info": {
+          "package_name": "com.igotuu.igotuu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBw6wioyUa_wDSElNcNYWzKXY_0BkuhUZA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

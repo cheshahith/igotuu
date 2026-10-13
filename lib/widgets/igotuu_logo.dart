@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 
-/// App Logo widget rendering "igotuu" or "igu" in the bold script font.
+/// App Logo widget rendering "igotuu" in the bold Pacifico script font.
+/// Rendered with native crisp anti-aliasing to prevent glyph descender clipping.
 class IgotuuLogo extends StatelessWidget {
   final double fontSize;
   final Color? color;
@@ -19,24 +20,13 @@ class IgotuuLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textWidget = ShaderMask(
-      shaderCallback: (bounds) {
-        return LinearGradient(
-          colors: [
-            color ?? AppColors.sageDark,
-            (color ?? AppColors.sageDark).withValues(alpha: 0.92),
-            AppColors.sage,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ).createShader(bounds);
-      },
-      child: Text(
-        'igotuu',
-        style: AppTypography.logoScript(
-          fontSize: fontSize,
-          color: Colors.white, // Masked by shader
-        ),
+    final textColor = color ?? AppColors.sageDark;
+
+    final textWidget = Text(
+      'igotuu',
+      style: AppTypography.logoScript(
+        fontSize: fontSize,
+        color: textColor,
       ),
     );
 

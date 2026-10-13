@@ -20,7 +20,8 @@ class LocationResult {
 class LocationService {
   LocationService._();
   static final LocationService instance = LocationService._();
-  final Geocoding _geocoding = Geocoding();
+  Geocoding? _geocodingInstance;
+  Geocoding get _geocoding => _geocodingInstance ??= Geocoding();
 
   /// Retrieve persisted address or default fallback
   Future<String> getSavedAddress() async {
@@ -40,6 +41,47 @@ class LocationService {
       return await prefs.setString(AppConstants.prefSavedAddress, address);
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Get current GPS position with graceful permission handling
+  Future<Position?> getCurrentPosition() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return null;
+      }
+
+      if (permission == LocationPermission.deniedForever) return null;
+
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 6),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Geocode an address string into latitude & longitude coordinates
+  Future<Map<String, double>?> getCoordinatesForAddress(String address) async {
+    try {
+      final locations = await _geocoding.locationFromAddress(address);
+      if (locations.isNotEmpty) {
+        return {
+          'latitude': locations.first.latitude,
+          'longitude': locations.first.longitude,
+        };
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 
